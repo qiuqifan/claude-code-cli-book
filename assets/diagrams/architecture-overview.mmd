@@ -1,0 +1,80 @@
+graph TB
+    subgraph "Layer 5: 用户交互层"
+        REPL[REPL 交互界面<br/>React + Ink]
+        CLI[命令行解析<br/>Commander.js]
+        Bridge[IDE 集成桥接<br/>VS Code/JetBrains]
+    end
+
+    subgraph "Layer 4: 应用层"
+        Commands[命令系统<br/>50+ Slash Commands]
+        QueryLoop[Query Loop<br/>LLM 对话循环]
+        Context[上下文管理<br/>System Prompt]
+    end
+
+    subgraph "Layer 3: 框架层 Harness"
+        Session[会话持久化<br/>JSONL Transcript]
+        TaskMgr[任务管理<br/>后台任务生命周期]
+        CronSched[定时调度<br/>Cron Scheduler]
+        Graceful[优雅关闭<br/>Cleanup Registry]
+        Worktree[Worktree 隔离<br/>Git 工作树]
+    end
+
+    subgraph "Layer 2: 工具执行层"
+        Tools[工具注册表<br/>43+ Tools]
+        FileTools[文件工具<br/>Read/Write/Edit/Glob]
+        ShellTools[Shell 工具<br/>Bash/Background]
+        AgentTools[Agent 工具<br/>Fork/Subagent/Team]
+        MCPTools[MCP 工具<br/>MCP Server 调用]
+        WebTools[Web 工具<br/>Fetch/Search]
+    end
+
+    subgraph "Layer 1: 基础设施层"
+        FileSystem[文件系统<br/>Bun FS API]
+        ProcessPool[进程管理<br/>Child Process/IPC]
+        MCPServers[MCP 服务器<br/>stdio/SSE 通信]
+        AnthropicAPI[Anthropic API<br/>Claude Models]
+        StateStore[状态存储<br/>AppState Zustand]
+    end
+
+    REPL --> Commands
+    CLI --> Commands
+    Bridge --> QueryLoop
+    Commands --> QueryLoop
+    QueryLoop --> Context
+    QueryLoop --> Tools
+    Tools --> FileTools
+    Tools --> ShellTools
+    Tools --> AgentTools
+    Tools --> MCPTools
+    Tools --> WebTools
+
+    TaskMgr --> ShellTools
+    TaskMgr --> AgentTools
+    Session --> QueryLoop
+    CronSched --> QueryLoop
+    Graceful --> Session
+    Worktree --> FileSystem
+
+    FileTools --> FileSystem
+    ShellTools --> ProcessPool
+    AgentTools --> ProcessPool
+    MCPTools --> MCPServers
+    WebTools --> AnthropicAPI
+    QueryLoop --> AnthropicAPI
+
+    TaskMgr --> StateStore
+    QueryLoop --> StateStore
+    Session --> FileSystem
+    MCPServers --> ProcessPool
+
+    classDef layer1 fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef layer2 fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef layer3 fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef layer4 fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef layer5 fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+
+    class FileSystem,ProcessPool,MCPServers,AnthropicAPI,StateStore layer1
+    class Tools,FileTools,ShellTools,AgentTools,MCPTools,WebTools layer2
+    class Session,TaskMgr,CronSched,Graceful,Worktree layer3
+    class Commands,QueryLoop,Context layer4
+    class REPL,CLI,Bridge layer5
