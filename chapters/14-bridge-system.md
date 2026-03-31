@@ -1,4 +1,4 @@
-# system - IDE Bridge 架构
+# 14 - IDE Bridge 架构
 
 > **摘要**
 >
