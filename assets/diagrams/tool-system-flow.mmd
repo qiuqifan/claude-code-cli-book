@@ -1,0 +1,64 @@
+sequenceDiagram
+    participant AI as Anthropic API
+    participant QE as Query Engine
+    participant TE as Tool Executor
+    participant PM as Permission Mgr
+    participant Tool
+    participant Env as Environment
+
+    AI->>QE: tool_use block
+    QE->>TE: executeTool(toolUse)
+
+    Note over TE: Phase 1: 查找工具
+    TE->>TE: findToolByName(name)
+    alt 工具不存在
+        TE-->>QE: Error: Unknown tool
+    end
+
+    Note over TE: Phase 2: 输入验证
+    TE->>TE: validateInput(input)
+    alt 验证失败
+        TE-->>QE: Error: Invalid input
+    end
+
+    Note over TE: Phase 3: Pre-Hook
+    TE->>TE: runPreToolUseHooks(tool, input)
+    alt Hook 拒绝
+        TE-->>QE: Error: Hook denied
+    end
+
+    Note over TE: Phase 4: 权限检查
+    TE->>PM: checkPermissions(tool, input)
+    PM->>PM: 检查规则、模式
+    alt 需要用户确认
+        PM-->>User: 显示权限对话框
+        User-->>PM: 批准/拒绝
+    end
+    alt 权限拒绝
+        PM-->>TE: PermissionDenied
+        TE-->>QE: Error: Permission denied
+    end
+    PM-->>TE: Allowed
+
+    Note over TE: Phase 5: 执行工具
+    TE->>Tool: call(args, context, canUseTool)
+    Tool->>Env: 执行操作 (文件、网络、进程)
+    loop 进度更新
+        Tool-->>TE: onProgress(event)
+        TE-->>QE: 渲染进度 UI
+    end
+    Env-->>Tool: 结果
+    Tool-->>TE: ToolResult
+
+    Note over TE: Phase 6: 结果处理
+    TE->>TE: processToolResultBlock(result)
+    alt 结果过大
+        TE->>Env: 保存到磁盘
+        TE->>TE: 替换为文件路径+预览
+    end
+
+    Note over TE: Phase 7: Post-Hook
+    TE->>TE: runPostToolUseHooks(tool, result)
+
+    TE-->>QE: tool_result block
+    QE->>AI: 发送 tool_result
