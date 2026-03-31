@@ -1319,49 +1319,50 @@ export const BashTool = buildTool({
 
 ## 第 6 节:与其他系统的关联
 
-### 6.1 依赖关系
+### 6.1 依赖的系统
 
-#### QueryEngine 依赖的系统
+QueryEngine 作为应用层的核心，依赖以下系统提供支撑:
 
-**1. Tool System (Layer 2)**
-- 查找工具定义 (`findToolByName`)
-- 执行工具 (`tool.call()`)
-- 验证输入 (`tool.inputSchema.safeParse()`)
+#### 1. [00-overview.md](./00-overview.md) - 架构总览
+**依赖关系**: QueryEngine 是五层架构中 Layer 4 (应用层) 的核心组件。
 
-**2. Permission System (Layer 3)**
-- 权限检查 (`canUseTool()`)
-- 权限拒绝记录 (`permissionDenials`)
+**依赖点**:
+- 实现 Query Loop 对话循环机制
+- 协调 Tool System 和 API 调用
+- 是整个系统的"心脏"
 
-**3. State Manager (Layer 3)**
-- 读取应用状态 (`getAppState()`)
-- 更新应用状态 (`setAppState()`)
+**数据流**: `用户输入` → `Query Loop` → `API 调用` → `Tool 执行` → `返回结果`
 
-**4. API Client (Layer 1)**
-- Anthropic API 调用 (`client.beta.messages.stream()`)
-- 重试机制 (`withRetry()`)
+**建议阅读顺序**: 先阅读 00-overview 了解 Query Loop 在架构中的位置，再学习本章的实现细节。
 
-#### 依赖注入模式
+#### 2. [04-tool-system.md](./04-tool-system.md) - Tool 工具系统
+**依赖关系**: QueryEngine 调用 Tool System 执行工具。
 
-QueryEngine 通过配置对象接收依赖,便于测试:
+**依赖点**:
+- `findToolByName()`: 查找工具定义
+- `tool.call()`: 执行工具逻辑
+- `tool.inputSchema.safeParse()`: 验证工具输入
+- `StreamingToolExecutor`: 并发执行工具
 
-```typescript
-const engine = new QueryEngine({
-  tools: mockTools,                    // 可 Mock
-  canUseTool: mockCanUseTool,          // 可 Mock
-  getAppState: () => mockAppState,     // 可 Mock
-  setAppState: mockSetAppState,        // 可 Mock
-  abortController: mockAbortController // 可 Mock
-})
-```
+**数据流**: `检测 tool_use` → `查找工具` → `执行工具` → `返回 tool_result` → `继续对话`
 
-### 6.2 被依赖关系
+**阅读建议**: 先理解 Tool System 的工具定义和执行机制，再学习 QueryEngine 如何调用工具。
 
-#### 上游系统
+### 6.2 被依赖的系统
 
-**1. REPL (交互层)**
+以下系统依赖 QueryEngine 提供对话能力:
 
-REPL 使用 QueryEngine 处理用户输入:
+#### 1. [11-repl-ui.md](./11-repl-ui.md) - REPL 交互界面
+**被依赖关系**: REPL 使用 QueryEngine 处理用户输入。
 
+**依赖点**:
+- REPL 创建 QueryEngine 实例
+- 流式接收 `submitMessage()` 返回的消息
+- 渲染 AI 响应和工具执行进度到终端 UI
+
+**数据流**: `用户输入` → `QueryEngine.submitMessage()` → `流式消息` → `REPL 渲染`
+
+**示例代码**:
 ```typescript
 // src/screens/REPL.tsx
 const handleSubmit = async (input: string) => {
@@ -1378,10 +1379,17 @@ const handleSubmit = async (input: string) => {
 }
 ```
 
-**2. SDK (headless 模式)**
+#### 2. [14-sdk-integration.md](./14-sdk-integration.md) - SDK 集成
+**被依赖关系**: SDK 提供 headless 模式的对话接口。
 
-SDK 提供编程接口:
+**依赖点**:
+- SDK 封装 QueryEngine 为编程接口
+- 支持流式 yield 消息
+- 提供会话管理能力
 
+**数据流**: `SDK 调用` → `QueryEngine.submitMessage()` → `流式消息` → `SDK 返回`
+
+**示例代码**:
 ```typescript
 // src/entrypoints/sdk/index.ts
 export async function* chat(prompt: string): AsyncGenerator<SDKMessage> {
@@ -1395,113 +1403,73 @@ export async function* chat(prompt: string): AsyncGenerator<SDKMessage> {
 }
 ```
 
-**3. Bridge (Agent 模式)**
+### 6.3 协作关系
 
-Agent 使用 QueryEngine 处理子任务:
+QueryEngine 与多个系统密切协作，以下是典型的协作场景:
 
-```typescript
-// src/tools/AgentTool/runAgent.ts
-const subEngine = new QueryEngine({
-  cwd: agentCwd,
-  tools: getAgentTools(agentId),
-  agentId,
-  // ...
-})
-
-for await (const message of subEngine.submitMessage(agentPrompt)) {
-  // 转发给主 Agent
-  mainEngine.forwardMessage(message)
-}
-```
-
-### 6.3 数据流
-
-#### 完整数据流图
+#### 场景 1: 工具调用循环
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ 用户输入                                             │
-│  "帮我搜索 TODO"                                     │
-└─────────────────┬───────────────────────────────────┘
-                  │
-                  ↓
-┌─────────────────────────────────────────────────────┐
-│ QueryEngine.submitMessage()                         │
-│  1. processUserInput() → 添加 user message          │
-│  2. fetchSystemPromptParts() → 构建系统提示词       │
-└─────────────────┬───────────────────────────────────┘
-                  │
-                  ↓
-┌─────────────────────────────────────────────────────┐
-│ query() [查询循环]                                   │
-│  ┌───────────────────────────────────────────────┐  │
-│  │ Loop Iteration 1                              │  │
-│  │  1. autocompact() → 上下文压缩 (可选)         │  │
-│  │  2. callModel() → 流式 API 调用              │  │
-│  │     ├─ yield text: "我来帮你搜索..."        │  │
-│  │     └─ yield tool_use: Grep(pattern='TODO')  │  │
-│  │  3. runTools() → 执行 Grep 工具              │  │
-│  │     └─ yield tool_result: "找到 3 处 TODO"   │  │
-│  └───────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────┐  │
-│  │ Loop Iteration 2                              │  │
-│  │  1. callModel() → 继续对话                   │  │
-│  │     └─ yield text: "找到以下 TODO:\n..."     │  │
-│  │  2. 无 tool_use → 循环结束                   │  │
-│  └───────────────────────────────────────────────┘  │
-└─────────────────┬───────────────────────────────────┘
-                  │
-                  ↓
-┌─────────────────────────────────────────────────────┐
-│ 最终结果                                             │
-│  yield { type: 'result', subtype: 'success', ... }  │
-└─────────────────────────────────────────────────────┘
+用户输入: "读取 README.md"
+  ↓
+QueryEngine.submitMessage()
+  ├→ 构建系统提示词
+  └→ 调用 query() 循环
+  ↓
+Loop Iteration 1:
+  ├→ callModel() - 调用 Anthropic API
+  ├→ 流式接收: tool_use: Read(file_path="README.md")
+  ├→ runTools() - 执行 Read Tool
+  │   ├→ Permission System: 检查权限 ✓
+  │   ├→ Tool System: 执行 tool.call()
+  │   └→ 返回 tool_result: 文件内容
+  └→ 追加 tool_result 到消息链
+  ↓
+Loop Iteration 2:
+  ├→ callModel() - 继续对话
+  ├→ 流式接收: text: "这是 README 的内容摘要..."
+  └→ stop_reason: end_turn → 循环结束
+  ↓
+返回最终结果给用户
 ```
 
-### 6.4 扩展点
+**涉及章节**:
+- [04-tool-system.md](./04-tool-system.md): Read Tool 的执行
+- [11-permission-system.md](./11-permission-system.md): 权限检查
 
-QueryEngine 提供以下扩展点:
+#### 场景 2: 多轮复杂任务
 
-#### 1. 自定义系统提示词
-
-```typescript
-const engine = new QueryEngine({
-  customSystemPrompt: '你是一个专业的代码审查助手...',
-  appendSystemPrompt: '额外说明:...'
-})
+```
+用户输入: "帮我搜索 TODO 并创建任务"
+  ↓
+QueryEngine 自动循环:
+  │
+  ├─ Turn 1: 调用 Grep Tool 搜索 TODO
+  │   └→ 返回: "找到 3 处 TODO"
+  │
+  ├─ Turn 2: 调用 TaskCreate Tool 创建任务
+  │   ├→ Task Framework: 注册任务
+  │   ├→ State Management: 更新 AppState
+  │   └→ 返回: "已创建 3 个任务"
+  │
+  └─ Turn 3: 生成总结 → 结束
 ```
 
-#### 2. 自定义工具
+**涉及章节**:
+- [04-tool-system.md](./04-tool-system.md): Grep Tool 和 TaskCreate Tool
+- [07-state-management.md](./07-state-management.md): 任务状态存储
+- [08-task-framework.md](./08-task-framework.md): 任务管理
 
-```typescript
-const customTool = buildTool({
-  name: 'CustomTool',
-  inputSchema: z.object({ input: z.string() }),
-  async call(input) {
-    // 自定义逻辑
-    return { output: '结果' }
-  }
-})
+### 6.4 阅读路径建议
 
-const engine = new QueryEngine({
-  tools: [...builtinTools, customTool]
-})
-```
+**前置阅读** (理解上下文):
+1. [00-overview.md](./00-overview.md) - 了解 Query Loop 在架构中的位置
+2. [04-tool-system.md](./04-tool-system.md) - 了解工具系统的实现
 
-#### 3. 钩子函数
-
-```typescript
-const engine = new QueryEngine({
-  handleElicitation: async (toolName, url) => {
-    // 处理 MCP 工具的 URL 请求
-    return await promptUserForURL(url)
-  },
-  setSDKStatus: (status) => {
-    // 推送状态到外部系统
-    externalSystem.updateStatus(status)
-  }
-})
-```
+**后续阅读** (深入应用):
+1. [11-repl-ui.md](./11-repl-ui.md) - 了解 QueryEngine 如何与 UI 集成
+2. [14-sdk-integration.md](./14-sdk-integration.md) - 了解 SDK 如何封装 QueryEngine
+3. [10-multi-agent.md](./10-multi-agent.md) - 了解子 Agent 如何使用 QueryEngine
 
 ---
 

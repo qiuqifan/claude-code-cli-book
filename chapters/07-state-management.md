@@ -904,12 +904,38 @@ export function onChangeAppState({ newState, oldState }) {
 
 ## 第 6 节:与其他系统的关联
 
-### 6.1 被 Task Framework 依赖
+### 6.1 依赖的系统
 
-**关系**: Task Framework 通过 AppState 管理所有后台任务的状态。
+State Management 作为 Layer 3 的核心，依赖以下基础架构:
 
-#### 任务生命周期
+#### 1. [00-overview.md](./00-overview.md) - 架构总览
+**依赖关系**: AppState 是五层架构中 Layer 3 (框架层) 的状态管理中心。
 
+**依赖点**:
+- 遵循 Immutable 更新模式
+- 使用轻量级 Store 实现（基于 React 的 `useSyncExternalStore`）
+- 通过 JSONL 持久化关键状态
+
+**数据流**: `状态更新` → `AppState 变化` → `触发订阅` → `组件重渲染`
+
+**建议阅读顺序**: 先阅读 00-overview 了解状态管理在架构中的位置，再学习本章的实现细节。
+
+### 6.2 被依赖的系统
+
+以下系统依赖 AppState 管理状态:
+
+#### 1. [08-task-framework.md](./08-task-framework.md) - 任务框架
+**被依赖关系**: Task Framework 通过 AppState 管理所有后台任务的状态。
+
+**依赖点**:
+- `tasks` 字段存储所有任务状态
+- `registerTask()` 注册新任务到 AppState
+- `updateTaskState()` 原子更新任务状态
+- `evictTerminalTask()` 清理完成的任务
+
+**数据流**: `任务创建` → `注册到 AppState.tasks` → `轮询更新` → `清理任务`
+
+**示例代码**:
 ```typescript
 // 任务创建
 setState(prev => ({
@@ -928,13 +954,107 @@ setState(prev => ({
 }))
 ```
 
-### 6.2 被 Permission System 依赖
+**阅读建议**: 理解 AppState 后，阅读 08 章了解任务状态如何管理。
 
-**关系**: 权限系统的所有状态 (模式、规则、历史决策) 存储在 `toolPermissionContext` 中。
+#### 2. [12-permission-system.md](./12-permission-system.md) - 权限系统
+**被依赖关系**: 权限系统的所有状态存储在 `toolPermissionContext` 中。
 
-### 6.3 被 Bridge System 依赖
+**依赖点**:
+- `toolPermissionContext.mode`: 当前权限模式
+- `toolPermissionContext.rules`: 用户定义的权限规则
+- `toolPermissionContext.recentDecisions`: 最近的权限决策历史
+- `denialTracking`: 拒绝追踪状态（用于自动降级）
 
-**关系**: Bridge 系统通过 AppState 管理连接状态和会话信息。
+**数据流**: `权限检查` → `读取 AppState.toolPermissionContext` → `返回决策` → `更新历史`
+
+**阅读建议**: 理解状态管理后，阅读 12 章了解权限状态如何使用。
+
+#### 3. [14-bridge-system.md](./14-bridge-system.md) - Bridge 系统
+**被依赖关系**: Bridge 系统通过 AppState 管理远程连接状态。
+
+**依赖点**:
+- `replBridgeEnabled`: Bridge 是否启用
+- `replBridgeConnected`: 环境是否已注册
+- `replBridgeSessionActive`: WebSocket 是否已连接
+- `replBridgeConnectUrl`: 供用户访问的 URL
+- `replBridgeSessionUrl`: claude.ai 上的会话 URL
+
+**数据流**: `Bridge 连接` → `更新 AppState.replBridge*` → `UI 显示状态`
+
+### 6.3 协作关系
+
+AppState 与多个系统密切协作，以下是典型的协作场景:
+
+#### 场景 1: 后台任务状态管理
+
+```
+用户输入: "后台运行 npm install"
+  ↓
+QueryEngine 调用 Bash Tool (run_in_background: true)
+  ↓
+Bash Tool:
+  ├→ 创建 TaskState
+  ├→ registerTask(task, setAppState)
+  │   └→ AppState.tasks[taskId] = task
+  ├→ 启动子进程
+  └→ 返回 Task ID
+  ↓
+Task Framework 轮询:
+  ├→ 读取 AppState.tasks[taskId]
+  ├→ 检查进程状态
+  ├→ updateTaskState(taskId, setAppState, ...)
+  │   └→ AppState.tasks[taskId].status = 'completed'
+  └→ 触发 UI 更新
+  ↓
+UI 显示: "Task completed"
+```
+
+**涉及章节**:
+- [04-tool-system.md](./04-tool-system.md): Bash Tool 的实现
+- [08-task-framework.md](./08-task-framework.md): 任务生命周期管理
+- [11-repl-ui.md](./11-repl-ui.md): UI 如何订阅状态
+
+#### 场景 2: 权限模式切换
+
+```
+用户操作: 按 Shift+Tab 切换权限模式
+  ↓
+REPL UI:
+  ├→ setAppState(prev => ({
+  │     ...prev,
+  │     toolPermissionContext: {
+  │       ...prev.toolPermissionContext,
+  │       mode: 'auto'
+  │     }
+  │   }))
+  └→ 触发 onChangeAppState()
+  ↓
+onChangeAppState:
+  ├→ 检测 mode 变化
+  ├→ notifySessionMetadataChanged({ permission_mode: 'auto' })
+  │   └→ 通知 CCR (Cloud Code Runner)
+  └→ saveGlobalConfig({ permissionMode: 'auto' })
+      └→ 持久化到 ~/.claude/globalConfig.json
+  ↓
+StatusLine 组件:
+  └→ useAppState(s => s.toolPermissionContext.mode)
+      └→ 触发重渲染，显示新模式
+```
+
+**涉及章节**:
+- [11-repl-ui.md](./11-repl-ui.md): REPL 如何更新状态
+- [12-permission-system.md](./12-permission-system.md): 权限模式的含义
+
+### 6.4 阅读路径建议
+
+**前置阅读** (理解上下文):
+1. [00-overview.md](./00-overview.md) - 了解状态管理在架构中的位置
+
+**后续阅读** (深入应用):
+1. [08-task-framework.md](./08-task-framework.md) - 了解任务状态如何管理
+2. [12-permission-system.md](./12-permission-system.md) - 了解权限状态如何使用
+3. [11-repl-ui.md](./11-repl-ui.md) - 了解 UI 如何订阅和更新状态
+4. [14-bridge-system.md](./14-bridge-system.md) - 了解 Bridge 状态管理
 
 ---
 

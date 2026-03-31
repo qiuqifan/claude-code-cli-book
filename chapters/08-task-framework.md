@@ -421,43 +421,78 @@ AppState 变化触发 SessionStorage 更新
 
 ---
 
-## 6. 系统关联
+## 6. 与其他系统的关联
 
-### 6.1 依赖关系
+### 6.1 依赖的系统
 
+Task Framework 依赖以下系统提供支撑:
+
+#### 1. [07-state-management.md](./07-state-management.md) - 状态管理
+**依赖关系**: Task Framework 通过 AppState 管理所有任务状态。
+
+**依赖点**:
+- `AppState.tasks`: 存储所有任务状态（任务字典）
+- `registerTask()`: 将任务注册到 AppState
+- `updateTaskState()`: 原子更新任务状态
+- `evictTerminalTask()`: 清理完成的任务
+
+**数据流**: `创建任务` → `注册到 AppState.tasks` → `轮询更新` → `清理任务`
+
+**建议阅读顺序**: 先阅读 07 章了解 AppState 的结构和更新模式，再学习任务框架如何使用它。
+
+#### 2. [09-cron-scheduler.md](./09-cron-scheduler.md) - 定时调度器
+**依赖关系**: Task Framework 的轮询机制基于定时调度。
+
+**依赖点**:
+- 使用 1 秒间隔的轮询检查任务状态
+- 定时读取任务输出增量
+- 定时通知用户任务完成
+
+**数据流**: `Cron 触发` → `检查任务状态` → `读取输出增量` → `更新 AppState`
+
+**阅读建议**: 理解定时调度机制后，更容易理解任务轮询的实现。
+
+### 6.2 被依赖的系统
+
+以下系统依赖 Task Framework 管理后台任务:
+
+#### 1. [10-multi-agent.md](./10-multi-agent.md) - 多 Agent 系统
+**被依赖关系**: Agent Tool 使用 Task Framework 管理子 Agent 进程。
+
+**依赖点**:
+- 子 Agent 作为 `LocalAgentTaskState` 注册到任务框架
+- 通过任务框架跟踪 Agent 的生命周期
+- 轮询 Agent 的输出和状态变化
+
+**数据流**: `派生 Agent` → `注册为任务` → `轮询状态` → `通知完成`
+
+**示例代码**:
+```typescript
+// AgentTool 使用任务框架
+const task: LocalAgentTaskState = {
+  type: 'local_agent',
+  id: agentId,
+  status: 'running',
+  agentName: 'researcher',
+  // ...
+}
+
+registerTask(task, context.setAppState)
 ```
-Task Framework
-      │
-      ├─ 依赖 AppState (src/state/AppStateStore.ts)
-      │  └─ 读取/写入任务状态
-      │
-      ├─ 依赖 SessionStorage (src/utils/sessionStorage.ts)
-      │  └─ 持久化任务状态到 transcript.jsonl
-      │
-      └─ 依赖 Notification 系统
-         └─ 推送任务输出和状态变化
-```
 
-### 6.2 被依赖关系
+**阅读建议**: 理解任务框架后，阅读 10 章了解子 Agent 如何作为任务管理。
 
-```
-Task Framework
-      │
-      ├─ BashTool (src/tools/BashTool/BashTool.tsx)
-      │  └─ 后台命令执行
-      │
-      ├─ AgentTool (src/tools/AgentTool/)
-      │  └─ 子 Agent 派生
-      │
-      ├─ Cron Scheduler (src/utils/cronScheduler.ts)
-      │  └─ 定时任务触发
-      │
-      └─ Dream 系统
-         └─ 长期后台任务
-```
+#### 2. [11-bash-tool.md](./11-bash-tool.md) - Bash 工具
+**被依赖关系**: Bash Tool 使用 Task Framework 管理后台命令。
 
-### 6.3 集成示例
+**依赖点**:
+- 后台命令作为 `LocalShellTaskState` 注册到任务框架
+- 通过任务框架跟踪命令执行状态
+- 轮询命令的输出和退出码
 
+**数据流**: `后台命令` → `注册为任务` → `轮询输出` → `命令完成`
+
+**集成示例**:
 ```typescript
 // BashTool 使用任务框架
 export function BashTool({
@@ -490,6 +525,86 @@ export function BashTool({
   }
 }
 ```
+
+### 6.3 协作关系
+
+Task Framework 与多个系统密切协作，以下是典型的协作场景:
+
+#### 场景 1: 后台命令执行
+
+```
+用户输入: "后台运行 npm install"
+  ↓
+QueryEngine 调用 Bash Tool (run_in_background: true)
+  ↓
+Bash Tool:
+  ├→ 创建 LocalShellTaskState
+  ├→ registerTask(task, setAppState)
+  │   └→ AppState.tasks[taskId] = task
+  ├→ 启动子进程 (detached: true)
+  ├→ 输出重定向到文件
+  └→ 返回 "Task started" 消息
+  ↓
+Task Framework 轮询 (1000ms 间隔):
+  ├→ 读取 AppState.tasks
+  ├→ 检查进程状态 (通过 PID)
+  ├→ 读取输出增量
+  │   └→ getTaskOutputDelta(taskId, currentOffset)
+  ├→ 更新 AppState.tasks[taskId]
+  │   └→ outputOffset, status
+  └→ 推送通知给用户
+  ↓
+任务完成:
+  ├→ updateTaskState(taskId, ..., { status: 'completed' })
+  ├→ 用户确认通知
+  └→ evictTerminalTask(taskId)
+      └→ 从 AppState.tasks 中移除
+```
+
+**涉及章节**:
+- [04-tool-system.md](./04-tool-system.md): Bash Tool 的实现
+- [07-state-management.md](./07-state-management.md): AppState 的状态管理
+- [09-cron-scheduler.md](./09-cron-scheduler.md): 轮询机制
+
+#### 场景 2: 子 Agent 管理
+
+```
+用户输入: "派生一个 Agent 研究项目"
+  ↓
+QueryEngine 调用 Agent Tool
+  ↓
+Agent Tool:
+  ├→ 创建 LocalAgentTaskState
+  ├→ registerTask(task, setAppState)
+  ├→ 派生子进程 (fork)
+  │   └→ 子进程运行独立的 QueryEngine
+  └→ 返回 "Agent started" 消息
+  ↓
+Task Framework 轮询:
+  ├→ 读取 Agent 输出增量
+  ├→ 检查 Agent 状态
+  ├→→ 更新 AppState.tasks[agentId]
+  └→ 推送 Agent 消息给用户
+  ↓
+Agent 完成:
+  ├→ updateTaskState(agentId, ..., { status: 'completed' })
+  ├→ 返回 Agent 最终结果
+  └→ 清理 Agent 任务
+```
+
+**涉及章节**:
+- [10-multi-agent.md](./10-multi-agent.md): Agent Tool 的实现
+- [07-state-management.md](./07-state-management.md): Agent 状态管理
+
+### 6.4 阅读路径建议
+
+**前置阅读** (理解上下文):
+1. [07-state-management.md](./07-state-management.md) - 了解 AppState 的结构和更新模式
+2. [09-cron-scheduler.md](./09-cron-scheduler.md) - 可选，了解定时调度机制
+
+**后续阅读** (深入应用):
+1. [10-multi-agent.md](./10-multi-agent.md) - 了解子 Agent 如何作为任务管理
+2. [11-bash-tool.md](./11-bash-tool.md) - 了解后台命令如何使用任务框架
 
 ---
 

@@ -940,78 +940,127 @@ export const AgentTool = buildTool({
 
 ## 第 6 节:与其他系统的关联
 
-### 6.1 依赖关系
+### 6.1 依赖的系统
 
-Tool 系统依赖以下系统:
+Tool 系统作为 Layer 2 的核心，依赖以下系统提供支撑:
 
-1. **Permission System** (02-permission-system.md)
-   - **依赖点**: `checkPermissions()` 调用权限检查函数
-   - **数据流**: `ToolInput` → `PermissionResult` (allow/deny/ask)
+#### 1. [00-overview.md](./00-overview.md) - 架构总览
+**依赖关系**: Tool 系统是五层架构中 Layer 2 的核心实现。
 
-2. **Query Engine** (06-query-engine.md)
-   - **依赖点**: QueryLoop 调用 Tool Executor 执行工具
-   - **数据流**: `tool_use` block → Tool 执行 → `tool_result` block
+**依赖点**:
+- 遵循五层架构设计原则
+- 实现 Tool-driven 架构模式
+- 作为 Layer 4 (应用层) 和 Layer 1 (基础设施层) 之间的桥梁
 
-3. **State Management** (07-state-management.md)
-   - **依赖点**: 工具通过 `context.getAppState()` 读取全局状态
-   - **数据流**: 工具可修改状态 (如后台任务、MCP 连接)
+**数据流**: `用户请求` → `Query Loop` → `Tool Executor` → `Tool.call()` → `底层 API`
 
-4. **Task Framework** (08-task-framework.md)
-   - **依赖点**: Bash Tool 注册后台任务,Agent Tool 管理子 Agent 生命周期
-   - **数据流**: 工具 → 创建 Task → Task Manager 调度
+**建议阅读顺序**: 先阅读 00-overview 了解整体架构，再学习本章的工具系统实现。
 
-### 6.2 被依赖关系
+#### 2. [03-mcp-integration.md](./03-mcp-integration.md) - MCP 集成
+**依赖关系**: MCP 工具是 Tool 系统的扩展机制之一。
 
-以下系统依赖 Tool 系统:
+**依赖点**:
+- `MCPTool` 通过 MCP Protocol 调用外部工具
+- MCP 服务器提供的工具定义���包装为标准 Tool 接口
+- 工具注册表动态加载 MCP 工具
 
-1. **MCP Integration** (03-mcp-integration.md)
-   - **依赖点**: MCP 工具 (MCPTool) 动态调用外部 MCP Server 的工具
-   - **数据流**: MCP Server 工具定义 → 包装为 Claude Code Tool
+**数据流**: `MCP Server` → `工具定义` → `包装为 Tool` → `注册到 Tools 数组`
 
-2. **Skill System** (Skills 章节)
-   - **依赖点**: Skill 脚本被编译为 SkillTool
-   - **数据流**: Markdown Skill → 解析 → SkillTool.call()
+### 6.2 被依赖的系统
 
-3. **Multi-Agent System** (09-multi-agent.md)
-   - **依赖点**: Agent Tool 是多 Agent 协作的入口
-   - **数据流**: 主 Agent → Agent Tool → 派生子 Agent → 子 Agent 工具调用
+以下系统依赖 Tool 系统作为基础:
+
+#### 1. [06-query-engine.md](./06-query-engine.md) - 查询引擎核心
+**被依赖关系**: Query Engine 调用 Tool Executor 执行工具。
+
+**依赖点**:
+- QueryLoop 检测 `tool_use` 块后调用工具
+- 流式处理工具执行进度
+- 将 `tool_result` 追加到消息链
+
+**数据流**: `API 返回 tool_use` → `Tool Executor` → `Tool.call()` → `tool_result` → `继续对话`
+
+**阅读建议**: 理解工具系统后，阅读 06 章了解工具如何被自动调用。
+
+#### 2. [12-cli-commands.md](./12-cli-commands.md) - 命令系统
+**被依赖关系**: Slash Commands 内部可能调用工具执行操作。
+
+**依赖点**:
+- `/commit` 命令内部调用 Bash Tool 执行 git 命令
+- `/read` 命令可能委派给 Read Tool 处理
+
+**数据流**: `用户输入 /commit` → `Command Handler` → `调用 Bash Tool` → `执行 git commit`
 
 ### 6.3 协作关系
 
-**案例: Git Commit 流程**
+Tool 系统与多个系统密切协作，以下是典型的协作场景:
 
-1. 用户: "提交代码更改"
-2. **Query Engine** 调用 **Bash Tool**: `git status`
-3. **Bash Tool** 检查权限 (通过 **Permission System**)
-4. **Bash Tool** 执行命令,返回文件列表
-5. **Query Engine** 调用 **Read Tool**: 读取修改的文件
-6. **Read Tool** 读取文件内容,返回 diff
-7. **Query Engine** 生成 commit message,调用 **Bash Tool**: `git commit -m "..."`
-8. **Bash Tool** 执行 commit,记录 Git 操作 (通过 **State Management**)
-
-**数据流图**:
+#### 场景 1: Git Commit 流程
 
 ```
-User → QueryLoop → Bash(git status) → Permission Check → Execute
-                                                           ↓
-                         ┌─────────────────────────────────┘
-                         ↓
-                    ToolResult (file list)
-                         ↓
-                    QueryLoop → Read(file1) → Permission Check → Execute
-                                                                   ↓
-                         ┌─────────────────────────────────────────┘
-                         ↓
-                    ToolResult (file content)
-                         ↓
-                    QueryLoop → Bash(git commit) → Permission Check → Execute
-                                                                       ↓
-                         ┌─────────────────────────────────────────────┘
-                         ↓
-                    ToolResult (commit success)
-                         ↓
-                    QueryLoop → 生成响应 → User
+用户输入: "提交代码更改"
+  ↓
+QueryEngine 解析意图
+  ↓
+调用 Bash Tool: git status
+  ├→ Permission System: 检查权限 ✓
+  └→ 执行命令 → 返回文件列表
+  ↓
+调用 Read Tool: 读取修改的文件
+  ├→ Permission System: 检查权限 ✓
+  └→ 读取文件 → 返回 diff
+  ↓
+AI 生成 commit message
+  ↓
+调用 Bash Tool: git commit -m "..."
+  ├→ Permission System: 检查权限 ✓
+  ├→ 执行 commit
+  └→ State Management: 记录操作
+  ↓
+返回结果给用户
 ```
+
+**涉及章节**:
+- [06-query-engine.md](./06-query-engine.md): 协调整个流程
+- [07-state-management.md](./07-state-management.md): 记录 Git 操作历史
+- [11-permission-system.md](./11-permission-system.md): 权限检查
+
+#### 场景 2: 后台任务执行
+
+```
+用户输入: "后台运行 npm install"
+  ↓
+QueryEngine 调用 Bash Tool (run_in_background: true)
+  ↓
+Bash Tool:
+  ├→ 创建 TaskState
+  ├→ 注册到 Task Framework
+  ├→ 启动子进程
+  └→ 返回 Task ID
+  ↓
+Task Framework:
+  ├→ 轮询任务状态
+  ├→ 增量读取输出
+  └→ 更新 State Management
+  ↓
+任务完成后通知用户
+```
+
+**涉及章节**:
+- [08-task-framework.md](./08-task-framework.md): 管理后台任务生命周期
+- [07-state-management.md](./07-state-management.md): 存储任务状态
+
+### 6.4 阅读路径建议
+
+**前置阅读** (理解上下文):
+1. [00-overview.md](./00-overview.md) - 了解五层架构和 Tool-driven 设计
+2. [03-mcp-integration.md](./03-mcp-integration.md) - 可选，了解工具扩展机制
+
+**后续阅读** (深入应用):
+1. [06-query-engine.md](./06-query-engine.md) - 了解工具如何被调用
+2. [07-state-management.md](./07-state-management.md) - 了解工具如何读写状态
+3. [08-task-framework.md](./08-task-framework.md) - 了解后台工具任务管理
+4. [12-cli-commands.md](./12-cli-commands.md) - 了解命令如何使用工具
 
 ---
 
