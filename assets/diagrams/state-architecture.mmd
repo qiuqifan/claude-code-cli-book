@@ -1,0 +1,62 @@
+graph TB
+    subgraph "React UI Layer"
+        REPL[REPL Component]
+        Messages[Messages Component]
+        PromptInput[PromptInput Component]
+        StatusLine[StatusLine Component]
+        TaskUI[TaskList Component]
+    end
+
+    subgraph "State Management Layer"
+        AppStateProvider[AppStateProvider]
+        AppState[AppState<br/>Zustand-like Store]
+        Store[Store Implementation<br/>getState/setState/subscribe]
+    end
+
+    subgraph "State Consumers"
+        useAppState[useAppState Hook<br/>useSyncExternalStore]
+        useSetAppState[useSetAppState Hook]
+        Selectors[Selectors<br/>getViewedTeammateTask<br/>getActiveAgentForInput]
+    end
+
+    subgraph "State Updaters"
+        QueryEngine[QueryEngine]
+        TaskFramework[Task Framework]
+        PermSystem[Permission System]
+        Bridge[Bridge System]
+        Commands[Slash Commands]
+    end
+
+    subgraph "Side Effects"
+        onChange[onChangeAppState]
+        Persist[Config Persistence]
+        CCRSync[CCR Metadata Sync]
+    end
+
+    REPL --> useAppState
+    Messages --> useAppState
+    PromptInput --> useAppState
+    PromptInput --> useSetAppState
+    StatusLine --> useAppState
+    TaskUI --> useAppState
+
+    useAppState --> AppStateProvider
+    useSetAppState --> AppStateProvider
+    AppStateProvider --> AppState
+    AppState --> Store
+
+    Selectors --> AppState
+
+    QueryEngine --> Store
+    TaskFramework --> Store
+    PermSystem --> Store
+    Bridge --> Store
+    Commands --> Store
+
+    Store --> onChange
+    onChange --> Persist
+    onChange --> CCRSync
+
+    style AppState fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    style Store fill:#50C878,stroke:#2E7D4E,stroke-width:2px,color:#fff
+    style useAppState fill:#F39C12,stroke:#D68910,stroke-width:2px,color:#fff
