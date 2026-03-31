@@ -4,7 +4,7 @@
 >
 > 系统化的技术文档项目，面向想要深入理解 Claude Code 内部实现的开发者
 
-🚧 **项目状态：** 正在建设中 (v0.1 开发阶段)
+🎉 **项目状态：** v0.1 Early Preview 已发布 (2026-03-31)
 
 ---
 
@@ -21,14 +21,18 @@ Claude Code 是 Anthropic 官方推出的 AI 辅助编程 CLI 工具。本项目
 
 ## 🚀 快速开始
 
-**已完成章节：**
-- [00-overview](chapters/00-overview.md) - 架构总览 ⭐ 必读
+**已完成章节 (v0.1):**
 
-**开发中：**
-- 04-tool-system.md - Tool 工具系统
-- 06-query-engine.md - 查询引擎核心
-- 07-state-management.md - 状态管理
-- 08-task-framework.md - 任务框架
+| 章节 | 标题 | 说明 |
+|------|------|------|
+| [00-overview](chapters/00-overview.md) | 架构总览 | ⭐ 必读 - 系统架构全景图 |
+| [04-tool-system](chapters/04-tool-system.md) | Tool 工具系统 | 工具抽象与调用机制 |
+| [06-query-engine](chapters/06-query-engine.md) | 查询引擎核心 | AI 查询处理引擎 |
+| [07-state-management](chapters/07-state-management.md) | 状态管理 | 全局状态与缓存机制 |
+| [08-task-framework](chapters/08-task-framework.md) | 任务框架 | 异步任务调度系统 |
+
+**多维导航索引:**
+- [guides/](guides/) - 按主题、难度、技术栈浏览
 
 更多章节陆续更新中...
 
@@ -44,6 +48,15 @@ claude-code-cli-book/
 ├── glossary.md        # 术语表
 └── README.md          # 本文件
 ```
+
+---
+
+## 📜 版本历史
+
+### v0.1 Early Preview (2026-03-31)
+- ✅ 完成 5 个核心章节
+- ✅ 建立多维导航索引系统
+- ✅ 搭建基础项目结构
 
 ---
 
