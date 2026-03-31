@@ -1,0 +1,52 @@
+sequenceDiagram
+    participant User
+    participant QE as QueryEngine
+    participant API as Anthropic API
+    participant Tool as Tool System
+    participant State as State Manager
+
+    Note over User,State: 查询引擎核心流程
+
+    User->>QE: submitMessage(prompt)
+    activate QE
+
+    QE->>State: 处理用户输入
+    State-->>QE: 添加 user message
+
+    QE->>QE: fetchSystemPromptParts()
+    Note right of QE: 构建系统提示词<br/>包含 userContext
+
+    QE->>API: messages.stream()
+    activate API
+    Note right of API: 流式 API 调用<br/>包含完整上下文
+
+    loop Tool Call Loop
+        API-->>QE: stream event: tool_use
+        Note right of QE: 检测到 tool_use block
+
+        QE->>Tool: executeTool(tool_use)
+        activate Tool
+
+        Tool->>Tool: 输入验证 (Zod Schema)
+        Tool->>Tool: 权限检查 (canUseTool)
+        Tool->>Tool: 执行工具逻辑
+
+        Tool-->>QE: 进度更新 (可选)
+        QE-->>User: 显示进度
+
+        Tool-->>QE: tool_result
+        deactivate Tool
+
+        QE->>State: 添加 tool_result
+        QE->>API: 追加 tool_result 继续流
+        Note right of API: 自动继续对话
+    end
+
+    API-->>QE: stream event: text block
+    API-->>QE: stream event: message_stop
+    deactivate API
+
+    QE->>State: 添加 assistant message
+    QE-->>User: 显示最终响应
+
+    deactivate QE
